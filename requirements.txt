@@ -1,0 +1,2 @@
+fastapi[all]==0.21.0
+mongogrant==0.2.2
