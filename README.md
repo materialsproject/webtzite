@@ -2,3 +2,6 @@ Looking for mpcontribs-webtzite? This has been moved to the main MPContribs [rep
 
 # webtzite
 A prototypal structure for serving materials data.
+
+# contributors
+- @dwinston
