@@ -5,3 +5,4 @@ A prototypal structure for serving materials data.
 
 # contributors
 - @dwinston
+- @dietherjohn20
