@@ -1,78 +1,51 @@
-import re
-from typing import List
+import urllib
+from datetime import datetime
 
-from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi import FastAPI, Depends
+from pymongo import MongoClient
+from starlette.requests import Request
 
-app = FastAPI()
+from .deps import EntryListingQueryParams
+from .collections import MongoCollection
+from .models import (
+    Link, Links, StructureResource, OptimadeResponseMeta, OptimadeResponseMetaQuery,
+    OptimadeStructureResponse,
+)
 
+app = FastAPI(
+    title=" OPTiMaDe API",
+    description=("The [Open Databases Integration for Materials Design (OPTiMaDe) consortium]"
+                 "(http://http://www.optimade.org/) aims to make materials databases interoperational"
+                 " by developing a common REST API."),
+    version="0.9",
+)
 
-class MDB:
-    cmp_tbl = {">": "$gt", ">=": "$gte", "<": "$lt", "<=": "$lte", "==": "$eq", "!=": "$ne"}
-
-    def __init__(self):
-        from mongogrant import Client
-        self.client = Client()
-        self.core_db = self.client.db("ro:dev/optimade_core")
-
-    def get_structure(self, structure_id):
-        doc = self.core_db.materials.find_one({"task_id": structure_id})
-        if doc:
-            return Structure.from_material_doc(doc)
-
-    def get_structures(self, filter_):
-        match = re.search(r'nelements([^0-9]+)([0-9]+)', filter_)
-        if match:
-            comp, n = match.groups()
-            crit = {"nelements": {self.cmp_tbl[comp]: int(n)}}
-            return [Structure.from_material_doc(doc) for doc in
-                    mdb.core_db.materials.find(crit, Structure.material_doc_projection())]
-        else:
-            return []
+client = MongoClient()
+structures = MongoCollection(client.optimade.structures, StructureResource)
 
 
-mdb = MDB()
+@app.get("/structures", response_model=OptimadeStructureResponse, response_model_skip_defaults=True, tags=['Structure'])
+def get_structures(request: Request, params: EntryListingQueryParams = Depends()):
+    results, more_data_available, data_available = structures.find(params)
+    parse_result = urllib.parse.urlparse(str(request.url))
+    if more_data_available:
+        query = urllib.parse.parse_qs(parse_result.query)
+        query['page[offset]'] = int(query.get('page[offset]', '[0]')[0]) + len(results)
+        urlencoded = urllib.parse.urlencode(query, doseq=True)
+        links = Links(next=Link(href=f'{parse_result.scheme}://{parse_result.netloc}{parse_result.path}?{urlencoded}'))
+    else:
+        links = Links(next=None)
 
-
-class Entry(BaseModel):
-    id: str
-    modification_date: str
-
-
-class Structure(Entry):
-    elements: str
-    nelements: int
-    chemical_formula: str
-    formula_prototype: str
-    _mp_cif: str
-
-    @staticmethod
-    def from_material_doc(doc):
-        return Structure(**{
-            "id": doc["task_id"],
-            "modification_date": doc["last_updated"].isoformat(),
-            "elements": ",".join(doc["elements"]),
-            "nelements": doc["nelements"],
-            "chemical_formula": doc["pretty_formula"],
-            "formula_prototype": doc["formula_anonymous"],
-            "cif": doc["cif"],
-        })
-
-    @staticmethod
-    def material_doc_projection():
-        return ["task_id", "last_updated", "elements", "nelements", "pretty_formula", "formula_anonymous", "cif"]
-
-
-@app.get("/")
-def get_home():
-    return {"hello": "world"}
-
-@app.get("/structures", response_model=List[Structure])
-def get_structures(filter_: str):
-    return [out.dict() for out in mdb.get_structures(filter_)]
-
-
-@app.get("/structures/{structure_id}", response_model=Structure)
-def get_structure(structure_id: str) -> Structure:
-    return mdb.get_structure(structure_id).dict()
-
+    meta = OptimadeResponseMeta(
+        query=OptimadeResponseMetaQuery(
+            representation=f'{parse_result.path}?{parse_result.query}'),
+        api_version='v0.9',
+        time_stamp=datetime.utcnow(),
+        data_returned=len(results),
+        more_data_available=more_data_available,
+    )
+    return OptimadeStructureResponse(
+        links=links,
+        data=results,
+        meta=meta,
+    )

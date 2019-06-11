@@ -1,2 +1,3 @@
-fastapi[all]==0.21.0
+fastapi[all]==0.28.0
 mongogrant==0.2.2
+optimade==0.1.12
